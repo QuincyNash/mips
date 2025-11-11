@@ -1,0 +1,7 @@
+# Readme
+
+To assemble a .asm file into machine code, do make run_compile. This produces an output file "out.txt".
+
+To run machine code, do "make run_load". This runs the input file "out.txt".
+
+The arguments for loading and writing files are defined at the top of compile.c and load.c.
