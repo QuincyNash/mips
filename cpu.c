@@ -11,7 +11,16 @@
 #define HI 32
 #define LO 33
 
-void CPU_destroy(CPU* cpu) { free(cpu); }
+void CPU_destroy(CPU* cpu) {
+  AddrData* current;
+  AddrData* tmp;
+
+  HASH_ITER(hh, cpu->memory, current, tmp) {
+    HASH_DEL(cpu->memory, current);
+    free(current);
+  }
+  free(cpu);
+}
 
 uint32_t get(CPU* cpu, uint8_t reg) { return cpu->regs[reg]; }
 
@@ -33,23 +42,14 @@ uint32_t get_memory(CPU* cpu, uint32_t address) {
     throw(cpu, MEMORY_OUT_OF_BOUNDS);
     return 0;
   }
-  if (address >= DATA_START_ADDRESS + MEMORY_SIZE) {
-    if (STACK_START_ADDRESS - address >= STACK_SIZE) {
-      throw(cpu, MEMORY_OUT_OF_BOUNDS);
-      return 0;
-    }
-    uint32_t offset = STACK_START_ADDRESS - address;
-    return cpu->stack[offset / 4];
-  } else if (address >= DATA_START_ADDRESS) {
-    uint32_t offset = address - DATA_START_ADDRESS;
-    return cpu->memory[offset / 4];
+
+  uint32_t out;
+  bool exists = get_data(&cpu->memory, address, &out);
+
+  if (!exists) {
+    return 0;  // default uninitialized memory to 0
   } else {
-    if (address - TEXT_START_ADDRESS >= PROGRAM_SIZE * 4) {
-      throw(cpu, MEMORY_OUT_OF_BOUNDS);
-      return 0;
-    }
-    uint32_t offset = address - TEXT_START_ADDRESS;
-    return cpu->program[offset / 4];
+    return out;
   }
 }
 
@@ -60,20 +60,7 @@ void set_memory(CPU* cpu, uint32_t address, uint32_t value) {
     throw(cpu, MEMORY_OUT_OF_BOUNDS);
     return;
   }
-  if (address >= DATA_START_ADDRESS + MEMORY_SIZE) {
-    if (STACK_START_ADDRESS - address >= STACK_SIZE) {
-      throw(cpu, MEMORY_OUT_OF_BOUNDS);
-      return;
-    }
-    uint32_t offset = STACK_START_ADDRESS - address;
-    cpu->stack[offset / 4] = value;
-  } else if (address >= DATA_START_ADDRESS) {
-    uint32_t offset = address - DATA_START_ADDRESS;
-    cpu->memory[offset / 4] = value;
-  } else {
-    throw(cpu, MEMORY_OUT_OF_BOUNDS);
-    return;
-  }
+  add_data(&cpu->memory, address, value);
 }
 
 static void ADD(CPU* cpu, struct RParams* p) {
@@ -554,17 +541,11 @@ CPU* CPU_init() {
   for (int i = 0; i < 34; i++) {
     cpu->regs[i] = 0;
   }
-  for (int i = 0; i < MEMORY_SIZE / 4; i++) {
-    cpu->memory[i] = 0;
-  }
-  for (int i = 0; i < STACK_SIZE / 4; i++) {
-    cpu->stack[i] = 0;
-  }
-  for (int i = 0; i < PROGRAM_SIZE; i++) {
-    cpu->program[i] = 0;
-  }
+
+  vec_init(&cpu->memory);
+
   cpu->program_size = 0;
-  cpu->pc = 0;
+  cpu->pc = TEXT_START_ADDRESS;
   cpu->error = NO_ERROR;
   cpu->error_address = 0;
 
@@ -642,17 +623,24 @@ void run_program(CPU* cpu) {
       throw(cpu, MEMORY_ALIGNMENT);
       break;
     }
-    if (cpu->pc / 4 >= cpu->program_size) {
+    uint32_t instr;
+    bool success = get_data(&cpu->memory, cpu->pc, &instr);
+    if (!success) {
       throw(cpu, PROGRAM_OUT_OF_BOUNDS);
       break;
     }
-    uint32_t instr = cpu->program[cpu->pc / 4];
     execute_instruction(cpu, instr);
   }
   if (cpu->error != NO_ERROR) {
     fprintf(stderr, "Error occurred at address: 0x%04X\n", cpu->error_address);
     fprintf(stderr, "Error: %s\n", ERROR_STRINGS[cpu->error]);
   }
+
+  // Print all memory
+  // AddrData *current, *tmp;
+  // HASH_ITER(hh, cpu->memory, current, tmp) {
+  //   printf("0x%08X: 0x%08X\n", current->address, current->data);
+  // }
 }
 
 CPU* load_program(char* filename) {
@@ -667,14 +655,8 @@ CPU* load_program(char* filename) {
   char line[34];  // 32 bit chunks + newline + null terminator
   uint16_t program_size = 0;
   while (fgets(line, sizeof(line), file) != NULL) {
-    if (program_size >= PROGRAM_SIZE) {
-      fprintf(stderr, "Error: Program size exceeds maximum limit of %d\n",
-              PROGRAM_SIZE);
-      fclose(file);
-      CPU_destroy(cpu);
-      return NULL;
-    }
-    cpu->program[program_size] = (uint32_t)strtol(line, NULL, 2);
+    uint32_t new_line = strtol(line, NULL, 2);
+    add_data(&cpu->memory, TEXT_START_ADDRESS + (program_size * 4), new_line);
     program_size++;
   }
   cpu->program_size = program_size;

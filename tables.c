@@ -1,5 +1,6 @@
 #include "tables.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -16,6 +17,30 @@ uint32_t get_value(StrToUint32** map, const char* name) {
   StrToUint32* r;
   HASH_FIND_STR(*map, name, r);
   return r ? r->value : 0xFFFFFFFF;
+}
+
+void add_data(AddrData** map, uint32_t address, uint32_t data) {
+  AddrData* r;
+  HASH_FIND(hh, *map, &address, sizeof(uint32_t), r);
+
+  if (r) {
+    r->data = data;  // update existing
+  } else {
+    r = malloc(sizeof(AddrData));
+    r->address = address;
+    r->data = data;
+    HASH_ADD(hh, *map, address, sizeof(uint32_t), r);
+  }
+}
+
+bool get_data(AddrData** map, uint32_t address, uint32_t* out_data) {
+  AddrData* r;
+  HASH_FIND(hh, *map, &address, sizeof(uint32_t), r);
+  if (r != NULL) {
+    if (out_data != NULL) *out_data = r->data;
+    return true;
+  }
+  return false;
 }
 
 void init_registers(StrToUint32** map) {

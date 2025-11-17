@@ -4,7 +4,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "array.h"
 #include "constants.h"
+#include "tables.h"
+#include "uthash.h"
 
 typedef enum Error {
   NO_ERROR,
@@ -19,11 +22,9 @@ typedef enum Error {
 
 typedef struct CPU {
   uint32_t regs[34];  // 32 general purpose + HI + LO
-  uint32_t memory[MEMORY_SIZE / 4];
-  uint32_t stack[STACK_SIZE / 4];
-  uint32_t program[PROGRAM_SIZE];
+  AddrData* memory;   // Stores all program, data, and stack memory
   uint16_t program_size;
-  uint16_t pc;
+  uint32_t pc;
   Error error;
   uint16_t error_address;
 } CPU;

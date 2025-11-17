@@ -1,41 +1,52 @@
 CC = gcc
-CFLAGS = -g -Wall -Wextra -Werror -fsanitize=address -fsanitize=undefined
+CFLAGS = -g -Wall -Wextra -Werror -MMD -MP
 # -fsanitize=address -fsanitize=undefined
+BUILD_DIR = build
 
-helper: helper.c helper.h
-	$(CC) $(CFLAGS) -c tahelperbles.c
+# Source files
+SRCS = cpu.c assembler.c tables.c helper.c array.c opcodes.c
+OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
+DEPS = $(OBJS:.o=.d)
 
-cpu: cpu.c cpu.h
-	$(CC) $(CFLAGS) -c cpu.c
+# Executable targets in build directory
+EXEC_COMPILE = $(BUILD_DIR)/compile
+EXEC_LOAD    = $(BUILD_DIR)/load
 
-assembler: assembler.c assembler.h
-	$(CC) $(CFLAGS) -c assembler.c
+all: $(EXEC_COMPILE) $(EXEC_LOAD)
 
-tables: tables.c tables.h
-	$(CC) $(CFLAGS) -c tables.c
+# Build executables from object files
+$(EXEC_COMPILE): $(OBJS) $(BUILD_DIR)/compile.o
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(BUILD_DIR)/compile.o
 
-opcodes: opcodes.c opcodes.h
-	$(CC) $(CFLAGS) -c opcodes.c
+$(EXEC_LOAD): $(OBJS) $(BUILD_DIR)/load.o
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(BUILD_DIR)/load.o
 
-compile: compile.c cpu.o assembler.o tables.o helper.o opcodes.o
-	$(CC) $(CFLAGS) -o compile compile.c cpu.o assembler.o tables.o helper.o opcodes.o
+# Pattern rule for all .o files
+$(BUILD_DIR)/%.o: %.c | build_dir
+	$(CC) $(CFLAGS) -c $< -o $@ -MF $(BUILD_DIR)/$*.d
 
-load: load.c cpu.o assembler.o tables.o helper.o opcodes.o
-	$(CC) $(CFLAGS) -o load load.c cpu.o assembler.o tables.o helper.o opcodes.o
+# Include auto-generated dependencies
+-include $(DEPS)
 
-run_compile: compile
-	./compile
+build: $(BUILD_DIR)/compile $(BUILD_DIR)/load
+	@echo "Build complete."
 
-run_load: load
-	./load
+# Convenience targets
+compile: $(EXEC_COMPILE)
+	$<
 
-leaks_compile: compile
-	leaks --atExit -- ./compile
+load: $(EXEC_LOAD)
+	$<
 
-leaks_load: load
-	leaks --atExit -- ./load
+leaks_compile: $(EXEC_COMPILE)
+	leaks --atExit -- $<
+
+leaks_load: $(EXEC_LOAD)
+	leaks --atExit -- $<
 
 clean:
-	rm -f *.o
-	rm -f compile load
-	rm -rf *.dSYM
+	rm -rf $(BUILD_DIR)
+
+.PHONY: build_dir
+build_dir:
+	mkdir -p $(BUILD_DIR)
