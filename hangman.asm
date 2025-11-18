@@ -1,5 +1,6 @@
 .data
 filename:           .asciiz "dict.txt"
+                    .align  2
 word:               .space  128                                             # buffer for selected word (127 + null)
 onech:              .space  1                                               # temp 1-byte buffer for file reads
 
