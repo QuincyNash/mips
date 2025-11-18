@@ -7,7 +7,7 @@
 #include "assembler.h"
 #include "helper.h"
 
-#define LOADING "file.asm"
+#define LOADING "hangman.asm"
 #define OUTPUT "out.txt"
 
 int main() {

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "helper.h"
 #include "opcodes.h"
 
 #define HI 32
@@ -19,6 +20,8 @@ void CPU_destroy(CPU* cpu) {
     HASH_DEL(cpu->memory, current);
     free(current);
   }
+  vec_deinit(&cpu->open_files);
+
   free(cpu);
 }
 
@@ -296,28 +299,8 @@ static void SYSCALL(CPU* cpu, RParams* p) {
 
   uint32_t code = get(cpu, 2);  // $v0
   switch (code) {
-    case 10:             // exit
-      cpu->pc = 0xFFFB;  // Will become 0xFFFF after pc += 4 in run_program
-      break;
     case 1:                              // print signed
       printf("%d", get_signed(cpu, 4));  // $a0
-      break;
-    case 34:                        // print hex
-      printf("%08X", get(cpu, 4));  // $a0
-      break;
-    case 35:  // print binary
-    {
-      uint32_t value = get(cpu, 4);  // $a0
-      for (int i = 31; i >= 0; i--) {
-        putchar((value & (1U << i)) ? '1' : '0');
-      }
-      break;
-    }
-    case 36:                      // print unsigned
-      printf("%u", get(cpu, 4));  // $a0
-      break;
-    case 11:                              // print char
-      printf("%c", (char)(get(cpu, 4)));  // $a0
       break;
     case 4:  // print string
     {
@@ -338,6 +321,316 @@ static void SYSCALL(CPU* cpu, RParams* p) {
         printf("%c", byte);
         address++;
       }
+      break;
+    }
+    case 5: {  // read_int
+      char buf[256];
+      if (!fgets(buf, sizeof(buf), stdin)) {
+        throw(cpu, INPUT_ERROR);
+        return;
+      }
+      char* end;
+      long val = strtol(buf, &end, 10);
+      if (end == buf) {
+        throw(cpu, INPUT_ERROR);
+        return;
+      }
+      if (val < INT32_MIN || val > INT32_MAX) {
+        throw(cpu, INPUT_ERROR);
+        return;
+      }
+      set(cpu, 2, (uint32_t)(int32_t)val);  // $v0
+      break;
+    }
+    case 8: {                         // read_string
+      uint32_t addr = get(cpu, 4);    // $a0 is buffer address
+      uint32_t maxlen = get(cpu, 5);  // $a1 is max length
+
+      if (maxlen == 0) break;  // nothing to write
+      char* buf = malloc(maxlen);
+      if (!fgets(buf, maxlen, stdin)) {
+        // On EOF, write empty string
+        set_memory(cpu, addr, 0);  // 0 is the null terminator
+        break;
+      }
+
+      // Write characters into emulator memory
+      for (uint32_t i = 0; i < maxlen; i++) {
+        uint32_t address = addr + i;
+        uint32_t byte_offset = address % 4;  // 0 = highest byte, 3 = lowest
+        uint32_t mask = ((uint32_t)0xFF) << (8 * (3 - byte_offset));
+        uint32_t word = get_memory(cpu, address - byte_offset);
+
+        set_memory(cpu, address - byte_offset,
+                   (word & ~mask) | (((uint32_t)(buf[i]) & 0xFFU)
+                                     << (8 * (3 - byte_offset))));
+        if (buf[i] == '\0') break;
+      }
+      free(buf);
+      break;
+    }
+    case 9: {                                    // sbrk
+      int32_t increment = (int32_t)get(cpu, 4);  // $a0
+
+      // align positive increments
+      int32_t aligned = increment;
+      if (increment > 0) {
+        aligned = (increment + 3) & ~3;
+      }
+      uint32_t old_break = get(cpu, 26);  // $k0
+
+      set(cpu, 2, old_break);             // return old break
+      set(cpu, 26, old_break + aligned);  // $k0 = new break
+      break;
+    }
+    case 10:             // exit
+      cpu->pc = 0xFFFB;  // Will become 0xFFFF after pc += 4 in run_program
+      cpu->exit_code = 0;
+      break;
+    case 11:                              // print char
+      printf("%c", (char)(get(cpu, 4)));  // $a0
+      break;
+    case 12:  // read char
+    {
+      int c = getchar();  // read one char
+      if (c == EOF) throw(cpu, INPUT_ERROR);
+
+      set(cpu, 2, (uint32_t)c);  // $v0
+
+      // flush rest of the line
+      int ch;
+      while ((ch = getchar()) != '\n' && ch != EOF);  // discard
+      break;
+    }
+    case 13:  // open file
+    {
+      uint32_t address = get(cpu, 4);  // $a0
+      // $a1 (read=0, write=1, read/write=2, append=3, append/read=4)
+      uint32_t flag = get(cpu, 5);
+      uint16_t filename_len = 32;
+      uint16_t i = 0;
+      char* filename = malloc(filename_len * sizeof(char));
+
+      // Read null-terminated string from memory
+      while (true) {
+        uint32_t byte_offset = address % 4;  // 0 = highest byte, 3 = lowest
+        uint32_t word = get_memory(cpu, address - byte_offset);
+
+        // Check for memory error
+        if (cpu->error != NO_ERROR) {
+          free(filename);
+          return;
+        }
+
+        char byte = (word >> (8 * (3 - byte_offset))) & 0xFF;
+        if (i >= filename_len) {
+          // Resize buffer
+          filename_len *= 2;
+          filename = realloc(filename, filename_len * sizeof(char));
+        }
+        filename[i] = byte;
+        if (byte == '\0') {
+          break;
+        }
+        address++;
+        i++;
+      }
+
+      const char* mode;
+      switch (flag) {
+        case 0:
+          mode = "r";
+          break;
+        case 1:
+          mode = "w";
+          break;
+        case 2:
+          mode = "r+";
+          break;
+        case 3:
+          mode = "a";
+          break;
+        case 4:
+          mode = "a+";
+          break;
+        default:
+          mode = "r";
+          break;  // default to read
+      }
+
+      FILE* file = fopen(filename, mode);
+      if (file == NULL) {
+        set(cpu, 2, (uint32_t)(-1));
+      } else {
+        // Save file pointer in CPU open_files vector
+        vec_push(&cpu->open_files, file);
+        free(filename);
+        set(cpu, 2, (uint32_t)(cpu->open_files.length - 1));  // return fd
+      }
+      break;
+    }
+    case 14: {                        // read file
+      uint32_t fd = get(cpu, 4);      // $a0
+      uint32_t addr = get(cpu, 5);    // $a1
+      uint32_t length = get(cpu, 6);  // $a2
+
+      if (fd >= (uint32_t)cpu->open_files.length) {
+        set(cpu, 2, -1);
+        break;
+      }
+
+      FILE* f = cpu->open_files.data[fd];
+      if (f == NULL) {
+        set(cpu, 2, -1);
+        break;
+      }
+
+      char* buf = malloc(length * sizeof(char));
+      size_t n = fread(buf, 1, length, f);
+
+      for (size_t i = 0; i < n; i++) {
+        uint32_t address = addr + i;
+        uint32_t byte_offset = address % 4;  // 0 = highest byte, 3 = lowest
+        uint32_t mask = ((uint32_t)0xFF) << (8 * (3 - byte_offset));
+        uint32_t word = get_memory(cpu, address - byte_offset);
+
+        set_memory(cpu, address - byte_offset,
+                   (word & ~mask) | (((uint32_t)(buf[i]) & 0xFFU)
+                                     << (8 * (3 - byte_offset))));
+      }
+
+      free(buf);
+      set(cpu, 2, (uint32_t)n);  // $v0 = number of bytes read
+      break;
+    }
+    case 15: {                        // write file
+      uint32_t fd = get(cpu, 4);      // $a0
+      uint32_t addr = get(cpu, 5);    // $a1
+      uint32_t length = get(cpu, 6);  // $a2
+
+      if (fd >= (uint32_t)cpu->open_files.length) {
+        set(cpu, 2, -1);
+        break;
+      }
+
+      FILE* f = cpu->open_files.data[fd];
+      if (f == NULL) {
+        set(cpu, 2, -1);
+        break;
+      }
+
+      char* buf = malloc(length * sizeof(char));
+      for (size_t i = 0; i < length; i++) {
+        uint32_t address = addr + i;
+        uint32_t byte_offset = address % 4;  // 0 = highest byte, 3 = lowest
+        uint32_t word = get_memory(cpu, address - byte_offset);
+
+        buf[i] = (char)((word >> (8 * (3 - byte_offset))) & 0xFF);
+      }
+
+      size_t n = fwrite(buf, 1, length, f);
+      free(buf);
+      set(cpu, 2, (uint32_t)n);  // $v0 = number of bytes written
+      break;
+    }
+    case 16: {  // close
+      uint32_t fd = get(cpu, 4);
+
+      if (fd >= (uint32_t)cpu->open_files.length ||
+          cpu->open_files.data[fd] == NULL) {
+        set(cpu, 2, -1);  // invalid fd
+        break;
+      }
+
+      FILE* f = cpu->open_files.data[fd];
+
+      // Do not allow closing stdin/stdout/stderr
+      if (fd < 3) {
+        set(cpu, 2, -1);
+        break;
+      }
+
+      if (fclose(f) != 0) {
+        set(cpu, 2, -1);  // error closing
+        break;
+      }
+
+      cpu->open_files.data[fd] = NULL;  // mark slot free
+      set(cpu, 2, 0);                   // success
+      break;
+    }
+    case 17: {                       // exit2
+      cpu->pc = 0xFFFB;              // Will become 0xFFFF after pc += 4
+      cpu->exit_code = get(cpu, 4);  // $a0
+      break;
+    }
+    case 19: {  // lseek
+      uint32_t fd = get(cpu, 4);
+      int32_t offset = (int32_t)get(cpu, 5);  // signed offset
+      uint32_t whence = get(cpu, 6);
+
+      if (fd >= (uint32_t)cpu->open_files.length ||
+          cpu->open_files.data[fd] == NULL) {
+        set(cpu, 2, -1);
+        break;
+      }
+
+      FILE* f = cpu->open_files.data[fd];
+
+      // Determine whence constant for fseek
+      int origin = -1;
+      switch (whence) {
+        case 0:
+          origin = SEEK_SET;
+          break;
+        case 1:
+          origin = SEEK_CUR;
+          break;
+        case 2:
+          origin = SEEK_END;
+          break;
+        default:
+          set(cpu, 2, -1);
+          break;  // invalid whence
+      }
+
+      if (origin == -1 || fseek(f, offset, origin) != 0) {
+        set(cpu, 2, -1);  // error
+        break;
+      }
+
+      long pos = ftell(f);
+      if (pos < 0) {
+        set(cpu, 2, -1);
+      } else {
+        set(cpu, 2, (uint32_t)pos);  // new file position
+      }
+      break;
+    }
+    case 34:                        // print hex
+      printf("%08X", get(cpu, 4));  // $a0
+      break;
+    case 35:  // print binary
+    {
+      uint32_t value = get(cpu, 4);  // $a0
+      for (int i = 31; i >= 0; i--) {
+        putchar((value & (1U << i)) ? '1' : '0');
+      }
+      break;
+    }
+    case 36:                      // print unsigned
+      printf("%u", get(cpu, 4));  // $a0
+      break;
+    case 41: {  // random int
+      uint32_t r = random_int();
+      set(cpu, 2, r);  // $v0 = result
+      break;
+    }
+    case 42: {                    // random range
+      uint32_t lo = get(cpu, 4);  // $a0
+      uint32_t hi = get(cpu, 5);  // $a1
+      uint32_t r = random_range(lo, hi);
+      set(cpu, 2, r);  // $v0 = result
       break;
     }
     default:
@@ -455,7 +748,8 @@ static void MTLO(CPU* cpu, RParams* p) { set(cpu, LO, get(cpu, p->rs)); }
 const char* ERROR_STRINGS[] = {"No Error",         "Memory Alignment Error",
                                "PC Out of Bounds", "Arithmetic Overflow",
                                "Divide by Zero",   "Unknown Instruction",
-                               "Unknown Syscall",  "Memory Out of Bounds"};
+                               "Unknown Syscall",  "Memory Out of Bounds",
+                               "Input Error"};
 
 /* Use runtime initialization instead of designated initializers to avoid
    C dialect issues (some compilers or build configs do not accept
@@ -536,6 +830,7 @@ static void init_instructions() {
 }
 
 CPU* CPU_init() {
+  set_random_seed();
   CPU* cpu = (CPU*)malloc(sizeof(CPU));
   // Initialize all registers and memory to zero
   for (int i = 0; i < 34; i++) {
@@ -543,11 +838,16 @@ CPU* CPU_init() {
   }
 
   vec_init(&cpu->memory);
+  vec_init(&cpu->open_files);
+  vec_push(&cpu->open_files, stdin);   // fd 0
+  vec_push(&cpu->open_files, stdout);  // fd 1
+  vec_push(&cpu->open_files, stderr);  // fd 2
 
   cpu->program_size = 0;
   cpu->pc = TEXT_START_ADDRESS;
   cpu->error = NO_ERROR;
   cpu->error_address = 0;
+  cpu->exit_code = 0;
 
   // Initialize $sp to top of stack
   cpu->regs[29] = STACK_START_ADDRESS;
@@ -617,7 +917,8 @@ void execute_instruction(CPU* cpu, uint32_t instr) {
   }
 }
 
-void run_program(CPU* cpu) {
+// Returns exit code of program
+int run_program(CPU* cpu) {
   while (cpu->error == NO_ERROR && cpu->pc != 0xFFFF) {
     if (cpu->pc % 4 != 0) {
       throw(cpu, MEMORY_ALIGNMENT);
@@ -635,6 +936,7 @@ void run_program(CPU* cpu) {
     fprintf(stderr, "Error occurred at address: 0x%04X\n", cpu->error_address);
     fprintf(stderr, "Error: %s\n", ERROR_STRINGS[cpu->error]);
   }
+  return cpu->exit_code;
 
   // Print all memory
   // AddrData *current, *tmp;

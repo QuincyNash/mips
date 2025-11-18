@@ -8,6 +8,7 @@
 #ifndef VEC_H
 #define VEC_H
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -140,5 +141,6 @@ typedef vec_t(char) vec_char_t;
 typedef vec_t(float) vec_float_t;
 typedef vec_t(double) vec_double_t;
 typedef vec_t(uint32_t) vec_uint32_t;
+typedef vec_t(FILE*) vec_file_t;
 
 #endif

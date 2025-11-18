@@ -568,6 +568,24 @@ vec_uint32_t* compile(Assembler* asmblr, int* out_size) {
   compile_section(asmblr, false);
   if (asmblr->error) return NULL;
 
+  // Align data-address to next word boundary
+  asmblr->data_address = (asmblr->data_address + 3U) & (~3U);
+  // Store data_address in $k0, used by syscall 9 for sbrk
+  char buf[32];  // enough to hold a 32-bit unsigned number
+  sprintf(buf, "%u", asmblr->data_address);
+  printf("Data segment starts at address: %s\n", buf);
+  char* args[] = {"$k0", buf, NULL};
+  LI(asmblr, args, 3);
+  // LI pushes to end intmd, but we want this at the start of storage_instr
+  // We know LI will generate exactly 3 instructions
+  // So remove last 3 instructions from intmd and add to storage_instr
+  for (int i = 0; i < 3; i++) {
+    char* instr = asmblr->intmd.data[asmblr->intmd.length - 3 + i].line;
+    vec_push(&asmblr->storage_instr, strdup(instr));
+    free(instr);
+  }
+  vec_splice(&asmblr->intmd, asmblr->intmd.length - 3, 3);
+
   // Add j main to end of storage instructions
   // Enough space for opcode, @main@, and null terminator
   char* instr_str = malloc(13);

@@ -432,6 +432,7 @@ void pseudo_immediate(Assembler* asmblr, char* rs, char* rt, char* imm,
       add_r_instruction(asmblr, NULL, rs, "$at", rt, "0", r_opcode);
     } else {
       // If r_opcode is 0xFFFF, we are doing a load/store memory instruction
+      add_r_instruction(asmblr, NULL, rs, "$at", "$at", "0", ADDU_OP);
       add_i_instruction(asmblr, NULL, "$at", rt, "0", opcode);
     }
 
@@ -627,9 +628,25 @@ static void MULT(Assembler* asmblr, char** args, int arg_count) {
                     MULT_OP);
 }
 
+static void MULTI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: multi $rs, imm -> li $at, immediate; mult $rs, $at
+  pseudo_immediate(asmblr, "$zero", "$at", args[1], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], args[0], "$at", "0", "0",
+                    MULT_OP);
+}
+
 static void MULTU(Assembler* asmblr, char** args, int arg_count) {
   // Syntax: multu $rs, $rt
   add_r_instruction(asmblr, args[arg_count - 1], args[0], args[1], "0", "0",
+                    MULTU_OP);
+}
+
+static void MULTIU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: multiu $rs, imm -> li $at, immediate; multu $rs, $at
+  pseudo_immediate(asmblr, "$zero", "$at", args[1], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], args[0], "$at", "0", "0",
                     MULTU_OP);
 }
 
@@ -641,10 +658,28 @@ static void MUL(Assembler* asmblr, char** args, int arg_count) {
                     MFLO_OP);
 }
 
+static void MULI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: muli rd, rs, immediate -> li $at, immediate; mult rs, $at; mflo rd
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, NULL, args[1], "$at", "0", "0", MULT_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$zero", "$zero", args[0], "0",
+                    MFLO_OP);
+}
+
 static void MULU(Assembler* asmblr, char** args, int arg_count) {
   // Syntax: mulu rd, rs, rt
   // Expands to multu rs, rt; mflo rd
   add_r_instruction(asmblr, NULL, args[1], args[2], "0", "0", MULTU_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$zero", "$zero", args[0], "0",
+                    MFLO_OP);
+}
+
+static void MULIU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: muliu rd, rs, imm -> li $at, imm; multu rs, $at; mflo rd
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, NULL, args[1], "$at", "0", "0", MULTU_OP);
   add_r_instruction(asmblr, args[arg_count - 1], "$zero", "$zero", args[0], "0",
                     MFLO_OP);
 }
@@ -709,9 +744,25 @@ static void SUB(Assembler* asmblr, char** args, int arg_count) {
                     SUB_OP);
 }
 
+static void SUBI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: subi rt, rs, immediate -> li $at, immediate; sub rd, rs, $at
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], args[1], "$at", args[0], "0",
+                    SUB_OP);
+}
+
 static void SUBU(Assembler* asmblr, char** args, int arg_count) {
   // Syntax: subu rd, rs, rt
   add_r_instruction(asmblr, args[arg_count - 1], args[1], args[2], args[0], "0",
+                    SUBU_OP);
+}
+
+static void SUBIU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: subiu rt, rs, immediate -> li $at, immediate; subu rd, rs, $at
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], args[1], "$at", args[0], "0",
                     SUBU_OP);
 }
 
@@ -755,6 +806,124 @@ static void SLTIU(Assembler* asmblr, char** args, int arg_count) {
   // Syntax: sltiu rt, rs, immediate
   pseudo_immediate(asmblr, args[1], args[0], args[2], SLTIU_OP, LUI_OP, ORI_OP,
                    args[1], args[arg_count - 1], SLTU_OP);
+}
+
+static void SEQ(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: seq rd, rs, rt -> sub $at, rs, rt; sltiu rd, $at, 1
+  add_r_instruction(asmblr, NULL, args[1], args[2], "$at", "0", SUB_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", SLTIU_OP);
+}
+
+static void SEQI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: seqi rd, rs, imm
+  // -> li $at, imm; sub $at, rs, $at; sltiu rd, $at, 1
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, NULL, args[1], "$at", "$at", "0", SUB_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", SLTIU_OP);
+}
+
+static void SNE(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sne rd, rs, rt -> sub $at, rs, rt; sltu rd, $zero, $at
+  add_r_instruction(asmblr, NULL, args[1], args[2], "$at", "0", SUB_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$zero", "$at", args[0], "0",
+                    SLTU_OP);
+}
+
+static void SNEI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: snei rd, rs, imm
+  // -> li $at, imm; sub $at, rs, $at; sltu rd, $zero, $at
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, NULL, args[1], "$at", "$at", "0", SUB_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$zero", "$at", args[0], "0",
+                    SLTU_OP);
+}
+
+static void SGE(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sge rd, rs, rt -> slt $at, rs, rt; xori rd, $at, 1
+  add_r_instruction(asmblr, NULL, args[1], args[2], "$at", "0", SLT_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", XORI_OP);
+}
+
+static void SGEI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sgei rd, rs, imm
+  // -> slti $at, rs, imm; xori rd, $at, 1
+  pseudo_immediate(asmblr, args[1], "$at", args[2], SLTI_OP, LUI_OP, ORI_OP,
+                   args[1], NULL, SLT_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", XORI_OP);
+}
+
+static void SGEU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sgeu rd, rs, rt -> sltu $at, rs, rt; xori rd, $at, 1
+  add_r_instruction(asmblr, NULL, args[1], args[2], "$at", "0", SLTU_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", XORI_OP);
+}
+
+static void SGEIU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sgeiu rd, rs, imm
+  // -> sltiu $at, rs, imm; xori rd, $at, 1
+  pseudo_immediate(asmblr, args[1], "$at", args[2], SLTIU_OP, LUI_OP, ORI_OP,
+                   args[1], NULL, SLTU_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", XORI_OP);
+}
+
+static void SGT(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sgt rd, rs, rt -> slt rd, rt, rs
+  add_r_instruction(asmblr, args[arg_count - 1], args[2], args[1], args[0], "0",
+                    SLT_OP);
+}
+
+static void SGTI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sgti rd, rs, imm -> li $at, imm; slt rd, $at, rs
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$at", args[1], args[0], "0",
+                    SLT_OP);
+}
+
+static void SGTU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sgtu rd, rs, rt -> sltu rd, rt, rs
+  add_r_instruction(asmblr, args[arg_count - 1], args[2], args[1], args[0], "0",
+                    SLTU_OP);
+}
+
+static void SGTIU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sgtiu rd, rs, imm -> li $at, imm; sltu rd, $at, rs
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$at", args[1], args[0], "0",
+                    SLTU_OP);
+}
+
+static void SLE(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sle rd, rs, rt -> slt $at, rt, rs; xori rd, $at, 1
+  add_r_instruction(asmblr, NULL, args[2], args[1], "$at", "0", SLT_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", XORI_OP);
+}
+
+static void SLEI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: slei rd, rs, imm
+  // -> li $at, imm; slt $at, $at, rs; xori rd, $at, 1
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, NULL, "$at", args[1], "$at", "0", SLT_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", XORI_OP);
+}
+
+static void SLEU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sleu rd, rs, rt -> sltu $at, rt, rs; xori rd, $at, 1
+  add_r_instruction(asmblr, NULL, args[2], args[1], "$at", "0", SLTU_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", XORI_OP);
+}
+
+static void SLEIU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: sleiu rd, rs, imm
+  // -> li $at, imm; sltu $at, $at, rs; xori rd, $at, 1
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, NULL, "$at", args[1], "$at", "0", SLTU_OP);
+  add_i_instruction(asmblr, args[arg_count - 1], "$at", args[0], "1", XORI_OP);
 }
 
 static void B(Assembler* asmblr, char** args, int arg_count) {
@@ -985,7 +1154,6 @@ static void SW_no_offset(Assembler* asmblr, char** args, int arg_count) {
 
 static void SW_only_offset(Assembler* asmblr, char** args, int arg_count) {
   // Syntax: sw rt, offset -> sw rt, offset($zero)
-  printf("HELLO\n");
   pseudo_immediate(asmblr, "$zero", args[0], args[1], SW_OP, LUI_OP, ORI_OP,
                    "$zero", args[arg_count - 1], 0xFFFF);
 }
@@ -1128,6 +1296,58 @@ static void NOP(Assembler* asmblr, char** args, int arg_count) {
                     SLL_OP);
 }
 
+static void NEG(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: neg rd, rs -> sub rd, $zero, rs
+  add_r_instruction(asmblr, args[arg_count - 1], "$zero", args[1], args[0], "0",
+                    SUB_OP);
+}
+
+static void NEGU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: negu rd, rs -> subu rd, $zero, rs
+  add_r_instruction(asmblr, args[arg_count - 1], "$zero", args[1], args[0], "0",
+                    SUBU_OP);
+}
+
+static void NOT(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: not rd, rs -> nor rd, rs, $zero
+  add_r_instruction(asmblr, args[arg_count - 1], args[1], "$zero", args[0], "0",
+                    NOR_OP);
+}
+
+static void REM(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: rem rd, rs, rt -> div rs, rt; mfhi rd
+  add_r_instruction(asmblr, NULL, args[1], args[2], "$zero", "0", DIV_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$0", "$0", args[0], "0",
+                    MFHI_OP);
+}
+
+static void REMI(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: remi rd, rs, imm
+  // -> li $at, imm; div rs, $at; mfhi rd
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, NULL, args[1], "$at", "$zero", "0", DIV_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$0", "$0", args[0], "0",
+                    MFHI_OP);
+}
+
+static void REMU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: remu rd, rs, rt -> divu rs, rt; mfhi rd
+  add_r_instruction(asmblr, NULL, args[1], args[2], "$zero", "0", DIVU_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$0", "$0", args[0], "0",
+                    MFHI_OP);
+}
+
+static void REMIU(Assembler* asmblr, char** args, int arg_count) {
+  // Syntax: remiu rd, rs, imm
+  // -> li $at, imm; divu rs, $at; mfhi rd
+  pseudo_immediate(asmblr, "$zero", "$at", args[2], ADDI_OP, LUI_OP, ORI_OP,
+                   "$zero", NULL, ADD_OP);
+  add_r_instruction(asmblr, NULL, args[1], "$at", "$zero", "0", DIVU_OP);
+  add_r_instruction(asmblr, args[arg_count - 1], "$0", "$0", args[0], "0",
+                    MFHI_OP);
+}
+
 static void init_instructions(Assembler* asmblr) {
   add_dir(asmblr, "data", "", DATA_dir);
   add_dir(asmblr, "text", "", TEXT_dir);
@@ -1155,9 +1375,37 @@ static void init_instructions(Assembler* asmblr) {
   add_cmd(asmblr, "div", "0 0", DIV);
   add_cmd(asmblr, "divu", "0 0", DIVU);
   add_cmd(asmblr, "mult", "0 0", MULT);
+  add_cmd(asmblr, "mult", "0 6", MULTI);
+  add_cmd(asmblr, "mult", "0 0 0", MUL);
+  add_cmd(asmblr, "mult", "0 0 6", MULI);
+  add_cmd(asmblr, "multi", "0 6", MULTI);
+  add_cmd(asmblr, "multi", "0 0", MULT);
+  add_cmd(asmblr, "multi", "0 0 6", MULI);
+  add_cmd(asmblr, "multi", "0 0 0", MUL);
   add_cmd(asmblr, "multu", "0 0", MULTU);
+  add_cmd(asmblr, "multu", "0 6", MULTIU);
+  add_cmd(asmblr, "multu", "0 0 0", MULU);
+  add_cmd(asmblr, "multu", "0 0 6", MULIU);
+  add_cmd(asmblr, "multiu", "0 6", MULTIU);
+  add_cmd(asmblr, "multiu", "0 0", MULTU);
+  add_cmd(asmblr, "multiu", "0 0 6", MULIU);
+  add_cmd(asmblr, "multiu", "0 0 0", MULU);
   add_cmd(asmblr, "mul", "0 0 0", MUL);
+  add_cmd(asmblr, "mul", "0 0 6", MULI);
+  add_cmd(asmblr, "mul", "0 0", MULT);
+  add_cmd(asmblr, "mul", "0 6", MULTI);
+  add_cmd(asmblr, "muli", "0 0 6", MULI);
+  add_cmd(asmblr, "muli", "0 0 0", MUL);
+  add_cmd(asmblr, "muli", "0 0", MULT);
+  add_cmd(asmblr, "muli", "0 6", MULTI);
   add_cmd(asmblr, "mulu", "0 0 0", MULU);
+  add_cmd(asmblr, "mulu", "0 0 6", MULIU);
+  add_cmd(asmblr, "mulu", "0 0", MULTU);
+  add_cmd(asmblr, "mulu", "0 6", MULTIU);
+  add_cmd(asmblr, "muliu", "0 0 6", MULIU);
+  add_cmd(asmblr, "muliu", "0 0 0", MULU);
+  add_cmd(asmblr, "muliu", "0 0", MULTU);
+  add_cmd(asmblr, "muliu", "0 6", MULTIU);
   add_cmd(asmblr, "nor", "0 0 0", NOR);
   add_cmd(asmblr, "or", "0 0 0", OR);
   add_cmd(asmblr, "or", "0 0 6", ORI);
@@ -1176,7 +1424,13 @@ static void init_instructions(Assembler* asmblr) {
   add_cmd(asmblr, "srlv", "0 0 0", SRLV);
   add_cmd(asmblr, "srlv", "0 0 3", SRL);
   add_cmd(asmblr, "sub", "0 0 0", SUB);
+  add_cmd(asmblr, "sub", "0 0 6", SUBI);
   add_cmd(asmblr, "subu", "0 0 0", SUBU);
+  add_cmd(asmblr, "subu", "0 0 6", SUBIU);
+  add_cmd(asmblr, "subi", "0 0 6", SUBI);
+  add_cmd(asmblr, "subi", "0 0 0", SUB);
+  add_cmd(asmblr, "subiu", "0 0 6", SUBIU);
+  add_cmd(asmblr, "subiu", "0 0 0", SUBU);
   add_cmd(asmblr, "xor", "0 0 0", XOR);
   add_cmd(asmblr, "xor", "0 0 6", XORI);
   add_cmd(asmblr, "xori", "0 0 6", XORI);
@@ -1190,6 +1444,38 @@ static void init_instructions(Assembler* asmblr) {
   add_cmd(asmblr, "slti", "0 0 0", SLT);
   add_cmd(asmblr, "sltiu", "0 0 6", SLTIU);
   add_cmd(asmblr, "sltiu", "0 0 0", SLTU);
+  add_cmd(asmblr, "seq", "0 0 0", SEQ);
+  add_cmd(asmblr, "seq", "0 0 6", SEQI);
+  add_cmd(asmblr, "seqi", "0 0 6", SEQI);
+  add_cmd(asmblr, "seqi", "0 0 0", SEQ);
+  add_cmd(asmblr, "sne", "0 0 0", SNE);
+  add_cmd(asmblr, "sne", "0 0 6", SNEI);
+  add_cmd(asmblr, "snei", "0 0 6", SNEI);
+  add_cmd(asmblr, "snei", "0 0 0", SNE);
+  add_cmd(asmblr, "sge", "0 0 0", SGE);
+  add_cmd(asmblr, "sge", "0 0 6", SGEI);
+  add_cmd(asmblr, "sgei", "0 0 6", SGEI);
+  add_cmd(asmblr, "sgei", "0 0 0", SGE);
+  add_cmd(asmblr, "sgeu", "0 0 0", SGEU);
+  add_cmd(asmblr, "sgeu", "0 0 6", SGEIU);
+  add_cmd(asmblr, "sgeiu", "0 0 6", SGEIU);
+  add_cmd(asmblr, "sgeiu", "0 0 0", SGEU);
+  add_cmd(asmblr, "sgt", "0 0 0", SGT);
+  add_cmd(asmblr, "sgt", "0 0 6", SGTI);
+  add_cmd(asmblr, "sgti", "0 0 6", SGTI);
+  add_cmd(asmblr, "sgti", "0 0 0", SGT);
+  add_cmd(asmblr, "sgtu", "0 0 0", SGTU);
+  add_cmd(asmblr, "sgtu", "0 0 6", SGTIU);
+  add_cmd(asmblr, "sgtiu", "0 0 6", SGTIU);
+  add_cmd(asmblr, "sgtiu", "0 0 0", SGTU);
+  add_cmd(asmblr, "sle", "0 0 0", SLE);
+  add_cmd(asmblr, "sle", "0 0 6", SLEI);
+  add_cmd(asmblr, "slei", "0 0 6", SLEI);
+  add_cmd(asmblr, "slei", "0 0 0", SLE);
+  add_cmd(asmblr, "sleu", "0 0 0", SLEU);
+  add_cmd(asmblr, "sleu", "0 0 6", SLEIU);
+  add_cmd(asmblr, "sleiu", "0 0 6", SLEIU);
+  add_cmd(asmblr, "sleiu", "0 0 0", SLEU);
 
   add_cmd(asmblr, "b", "7", B);
   add_cmd(asmblr, "beq", "0 0 7", BEQ);
@@ -1274,6 +1560,17 @@ static void init_instructions(Assembler* asmblr) {
   add_cmd(asmblr, "li", "0 6", LI);
   add_cmd(asmblr, "la", "0 6", LA);
   add_cmd(asmblr, "nop", "", NOP);
+  add_cmd(asmblr, "neg", "0 0", NEG);
+  add_cmd(asmblr, "negu", "0 0", NEGU);
+  add_cmd(asmblr, "not", "0 0", NOT);
+  add_cmd(asmblr, "rem", "0 0 0", REM);
+  add_cmd(asmblr, "rem", "0 0 6", REMI);
+  add_cmd(asmblr, "remi", "0 0 6", REMI);
+  add_cmd(asmblr, "remi", "0 0 0", REM);
+  add_cmd(asmblr, "remu", "0 0 0", REMU);
+  add_cmd(asmblr, "remu", "0 0 6", REMIU);
+  add_cmd(asmblr, "remiu", "0 0 6", REMIU);
+  add_cmd(asmblr, "remiu", "0 0 0", REMU);
 }
 
 #endif

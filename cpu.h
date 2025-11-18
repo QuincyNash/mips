@@ -17,16 +17,19 @@ typedef enum Error {
   DIVIDE_BY_ZERO,
   UNKNOWN_INSTRUCTION,
   UNKNOWN_SYSCALL,
-  MEMORY_OUT_OF_BOUNDS
+  MEMORY_OUT_OF_BOUNDS,
+  INPUT_ERROR
 } Error;
 
 typedef struct CPU {
-  uint32_t regs[34];  // 32 general purpose + HI + LO
-  AddrData* memory;   // Stores all program, data, and stack memory
+  uint32_t regs[34];      // 32 general purpose + HI + LO
+  AddrData* memory;       // Stores all program, data, and stack memory
+  vec_file_t open_files;  // Stores all opened file pointers
   uint16_t program_size;
   uint32_t pc;
   Error error;
   uint16_t error_address;
+  int exit_code;
 } CPU;
 
 typedef struct RParams {
@@ -70,8 +73,8 @@ typedef struct JInstruction {
 CPU* CPU_init();
 // Destroy a CPU instance
 void CPU_destroy(CPU* cpu);
-// Run the program loaded in program memory
-void run_program(CPU* cpu);
+// Run the program loaded in program memory (returns exit code)
+int run_program(CPU* cpu);
 // Load a program from a file into CPU program memory
 CPU* load_program(char* filename);
 

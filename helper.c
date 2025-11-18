@@ -2,9 +2,12 @@
 
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 char* int_to_binary(uint32_t value, int bits) {
   char* str = malloc(bits + 1);
@@ -176,4 +179,49 @@ char* unescape_c_string(const char* str) {
 
   *dst = '\0';
   return out;
+}
+
+typedef struct {
+  uint64_t state;
+  uint64_t inc;
+} pcg32_random_t;
+
+// Static so it's only accessible within this file
+static pcg32_random_t rng;
+
+static uint32_t pcg32_random_r(pcg32_random_t* rng) {
+  uint64_t oldstate = rng->state;
+  rng->state = oldstate * 6364136223846793005ULL + (rng->inc | 1);
+  uint32_t xorshifted = ((oldstate >> 18u) ^ oldstate) >> 27u;
+  uint32_t rot = oldstate >> 59u;
+  return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
+}
+
+static void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate,
+                            uint64_t initseq) {
+  rng->state = 0U;
+  rng->inc = (initseq << 1u) | 1u;
+  pcg32_random_r(rng);
+  rng->state += initstate;
+  pcg32_random_r(rng);
+}
+
+void set_random_seed(void) {
+  uint64_t seed1 = (uint64_t)time(NULL);
+  uint64_t seed2 = ((uint64_t)getpid() << 32) ^ (uint64_t)clock();
+  pcg32_srandom_r(&rng, seed1, seed2);
+}
+
+uint32_t random_int(void) { return pcg32_random_r(&rng); }
+
+uint32_t random_range(uint32_t lo, uint32_t hi) {
+  if (hi < lo) {
+    uint32_t t = lo;
+    lo = hi;
+    hi = t;
+  } else if (hi == lo) {
+    return lo;
+  }
+  uint32_t span = (uint32_t)(hi - lo + 1U);
+  return lo + (random_int() % span);
 }
